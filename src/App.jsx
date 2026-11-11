@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Activity, ArrowLeft, BarChart3, Check, ChevronRight, Dumbbell, Edit3, Info, LogOut, Plus, Trash2, UserRound, X } from 'lucide-react'
+import { Activity, ArrowLeft, BarChart3, Check, ChevronRight, Dumbbell, Edit3, Info, Link2, LogOut, Plus, Trash2, UserRound, X } from 'lucide-react'
 import { createUserWithEmailAndPassword, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth'
 import { auth, authPersistenceReady } from './firebase'
 import { createUserData, deleteUserData, listUserData, updateUserData } from './services/workoutService'
@@ -12,12 +12,26 @@ const tabs = [
   { id: 'stats', label: 'Stats', icon: BarChart3 },
   { id: 'account', label: 'Compte', icon: UserRound },
 ]
-const emptyExercise = { name: '', sets: 3, reps: 10, rest: 90 }
-const dateLabel = (value) => new Date(value?.seconds ? value.seconds * 1000 : value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
-const errorLabel = (error) => error?.code?.replace('auth/', '').replaceAll('-', ' ') || 'Une erreur est survenue.'
 
-function Button({ children, variant = 'primary', className = '', ...props }) { return <button className={`button button-${variant} ${className}`} {...props}>{children}</button> }
+/** Valeurs par défaut d'un slot d'exercice */
+const emptyExercise = { sets: 3, reps: 10, rest: 90 }
 
+/** Crée un item "exercice simple" prêt à l'emploi */
+const makeExerciseItem = (exerciseId = '') => ({ type: 'exercise', exerciseId, ...emptyExercise })
+
+/** Crée un item "superset" avec les deux slots passés */
+const makeSuperset = (a, b) => ({ type: 'superset', exercises: [a, b] })
+
+const dateLabel = (value) =>
+  new Date(value?.seconds ? value.seconds * 1000 : value).toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' })
+const errorLabel = (error) =>
+  error?.code?.replace('auth/', '').replaceAll('-', ' ') || 'Une erreur est survenue.'
+
+function Button({ children, variant = 'primary', className = '', ...props }) {
+  return <button className={`button button-${variant} ${className}`} {...props}>{children}</button>
+}
+
+/* ─────────────────────────── AUTH ─────────────────────────── */
 function AuthScreen() {
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({ email: '', password: '' })
@@ -25,49 +39,363 @@ function AuthScreen() {
   const [busy, setBusy] = useState(false)
   async function submit(event) {
     event.preventDefault(); setError(''); setBusy(true)
-    try { await authPersistenceReady; if (mode === 'login') await signInWithEmailAndPassword(auth, form.email, form.password); else await createUserWithEmailAndPassword(auth, form.email, form.password) }
-    catch (firebaseError) { setError(errorLabel(firebaseError)) } finally { setBusy(false) }
+    try {
+      await authPersistenceReady
+      if (mode === 'login') await signInWithEmailAndPassword(auth, form.email, form.password)
+      else await createUserWithEmailAndPassword(auth, form.email, form.password)
+    } catch (firebaseError) { setError(errorLabel(firebaseError)) } finally { setBusy(false) }
   }
-  return <main className="auth-page"><div className="brand-mark"><Dumbbell size={26} /></div><p className="eyebrow">PRIVATE TRAINING</p><h1>Ton entraînement.<br /><span>Ta progression.</span></h1><form className="card auth-card" onSubmit={submit}><div className="segmented"><button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Connexion</button><button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>Inscription</button></div><label>Email<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="toi@exemple.com" /></label><label>Mot de passe<input required minLength="6" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" /></label>{error && <p className="error">{error}</p>}<Button disabled={busy}>{busy ? 'Chargement...' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'} <ChevronRight size={18} /></Button></form></main>
+  return (
+    <main className="auth-page">
+      <div className="brand-mark"><Dumbbell size={26} /></div>
+      <p className="eyebrow">PRIVATE TRAINING</p>
+      <h1>Ton entraînement.<br /><span>Ta progression.</span></h1>
+      <form className="card auth-card" onSubmit={submit}>
+        <div className="segmented">
+          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Connexion</button>
+          <button type="button" className={mode === 'signup' ? 'active' : ''} onClick={() => setMode('signup')}>Inscription</button>
+        </div>
+        <label>Email<input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="toi@exemple.com" /></label>
+        <label>Mot de passe<input required minLength="6" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="••••••••" /></label>
+        {error && <p className="error">{error}</p>}
+        <Button disabled={busy}>{busy ? 'Chargement...' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'} <ChevronRight size={18} /></Button>
+      </form>
+    </main>
+  )
 }
 
+/* ─────────────────────────── EXERCICES ─────────────────────── */
 function Exercises({ uid, exercises, refresh, setNotice }) {
   const [name, setName] = useState(''); const [editing, setEditing] = useState(null)
   async function save(event) {
     event.preventDefault(); if (!name.trim()) return
-    try { if (editing) await updateUserData('exercises', editing.id, { name: name.trim() }); else await createUserData('exercises', uid, { name: name.trim() }); setName(''); setEditing(null); await refresh() }
-    catch { setNotice('Impossible d’enregistrer cet exercice.') }
+    try {
+      if (editing) await updateUserData('exercises', editing.id, { name: name.trim() })
+      else await createUserData('exercises', uid, { name: name.trim() })
+      setName(''); setEditing(null); await refresh()
+    } catch { setNotice('Impossible d\u2019enregistrer cet exercice.') }
   }
-  async function remove(id) { if (!window.confirm('Supprimer cet exercice ?')) return; try { await deleteUserData('exercises', id); await refresh() } catch { setNotice('Impossible de supprimer cet exercice.') } }
-  return <Page title="Exercices" subtitle={`${exercises.length} mouvement${exercises.length > 1 ? 's' : ''}`}><form className="inline-form" onSubmit={save}><input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de l’exercice" /><Button aria-label="Ajouter"><Plus size={20} /></Button></form><div className="list">{exercises.map((exercise) => <div className="list-row" key={exercise.id}>{editing?.id === exercise.id ? <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save(e)} /> : <span>{exercise.name}</span>}<div className="row-actions">{editing?.id === exercise.id ? <button onClick={save}><Check size={18} /></button> : <button onClick={() => { setEditing(exercise); setName(exercise.name) }}><Edit3 size={17} /></button>}<button onClick={() => remove(exercise.id)}><Trash2 size={17} /></button></div></div>)}</div>{!exercises.length && <Empty text="Ajoute ton premier mouvement pour commencer." />}</Page>
+  async function remove(id) {
+    if (!window.confirm('Supprimer cet exercice ?')) return
+    try { await deleteUserData('exercises', id); await refresh() }
+    catch { setNotice('Impossible de supprimer cet exercice.') }
+  }
+  return (
+    <Page title="Exercices" subtitle={`${exercises.length} mouvement${exercises.length > 1 ? 's' : ''}`}>
+      <form className="inline-form" onSubmit={save}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nom de l'exercice" />
+        <Button aria-label="Ajouter"><Plus size={20} /></Button>
+      </form>
+      <div className="list">
+        {exercises.map((exercise) => (
+          <div className="list-row" key={exercise.id}>
+            {editing?.id === exercise.id
+              ? <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && save(e)} />
+              : <span>{exercise.name}</span>
+            }
+            <div className="row-actions">
+              {editing?.id === exercise.id
+                ? <button onClick={save}><Check size={18} /></button>
+                : <button onClick={() => { setEditing(exercise); setName(exercise.name) }}><Edit3 size={17} /></button>
+              }
+              <button onClick={() => remove(exercise.id)}><Trash2 size={17} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {!exercises.length && <Empty text="Ajoute ton premier mouvement pour commencer." />}
+    </Page>
+  )
+}
+
+/* ─────────────────────── SESSION EDITOR ─────────────────────── */
+
+/**
+ * Sous-formulaire pour un slot d'exercice (utilisé dans les simples ET dans les supersets).
+ * @param {object} props
+ * @param {object} props.item       – données du slot { exerciseId, sets, reps, rest }
+ * @param {string} props.label      – libellé affiché (ex: "Exercice 1" ou "A")
+ * @param {function} props.onChange – callback (key, value)
+ * @param {Array}  props.exercises  – liste complète des exercices disponibles
+ */
+function ExerciseSlot({ item, label, onChange, exercises }) {
+  return (
+    <div className="exercise-slot">
+      <span className="slot-label">{label}</span>
+      <select value={item.exerciseId} onChange={(e) => onChange('exerciseId', e.target.value)}>
+        {exercises.map((ex) => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
+      </select>
+      <div className="three-fields">
+        <label>Séries<input type="number" min="1" value={item.sets} onChange={(e) => onChange('sets', Number(e.target.value))} /></label>
+        <label>Reps<input type="number" min="1" value={item.reps} onChange={(e) => onChange('reps', Number(e.target.value))} /></label>
+        <label>Repos (s)<input type="number" min="0" value={item.rest} onChange={(e) => onChange('rest', Number(e.target.value))} /></label>
+      </div>
+    </div>
+  )
 }
 
 function SessionEditor({ initial, exercises, onClose, onSave, setNotice }) {
-  const [name, setName] = useState(initial?.name || ''); const [items, setItems] = useState(initial?.exercises || [])
-  function addItem() { if (items.length < 10) setItems([...items, { exerciseId: exercises[0]?.id || '', ...emptyExercise }]) }
-  function change(index, key, value) { setItems(items.map((item, i) => i === index ? { ...item, [key]: key === 'exerciseId' ? value : Number(value) } : item)) }
-  async function save(event) { event.preventDefault(); if (!name.trim() || !items.length) { setNotice('Indique un nom et au moins un exercice.'); return }; await onSave({ name: name.trim(), exercises: items }) }
-  return <Page title={initial ? 'Modifier la séance' : 'Nouvelle séance'} back={onClose}><form className="stack" onSubmit={save}><label>Nom de la séance<input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Push, jambes..." /></label>{items.map((item, index) => <div className="card exercise-config" key={`${index}-${item.exerciseId}`}><div className="config-head"><strong>Exercice {index + 1}</strong><button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}><X size={18} /></button></div><select value={item.exerciseId} onChange={(e) => change(index, 'exerciseId', e.target.value)}>{exercises.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}</select><div className="three-fields"><label>Séries<input type="number" min="1" value={item.sets} onChange={(e) => change(index, 'sets', e.target.value)} /></label><label>Reps<input type="number" min="1" value={item.reps} onChange={(e) => change(index, 'reps', e.target.value)} /></label><label>Repos (s)<input type="number" min="0" value={item.rest} onChange={(e) => change(index, 'rest', e.target.value)} /></label></div></div>)}<Button type="button" variant="secondary" disabled={items.length >= 10 || !exercises.length} onClick={addItem}><Plus size={18} /> Ajouter un exercice</Button><Button>Enregistrer la séance <Check size={18} /></Button></form></Page>
+  const [name, setName] = useState(initial?.name || '')
+
+  /**
+   * items est un tableau d'éléments pouvant être :
+   *   { type: 'exercise', exerciseId, sets, reps, rest }
+   *   { type: 'superset', exercises: [{ exerciseId, sets, reps, rest }, ...] }
+   */
+  const [items, setItems] = useState(() => {
+    const src = initial?.exercises || []
+    // Rétro-compatibilité : si les items n'ont pas de `type`, on les traite comme 'exercise'
+    return src.map((item) =>
+      item.type ? item : { type: 'exercise', ...item }
+    )
+  })
+
+  /* ── Helpers ── */
+  function addSimple() {
+    if (items.length >= 10 || !exercises.length) return
+    setItems([...items, makeExerciseItem(exercises[0]?.id || '')])
+  }
+
+  function removeItem(index) {
+    setItems(items.filter((_, i) => i !== index))
+  }
+
+  /**
+   * Fusionne deux exercices simples consécutifs en un superset.
+   * On prend l'item à `index` et celui à `index + 1`.
+   */
+  function mergeAsSuperset(index) {
+    if (index >= items.length - 1) return
+    const a = items[index]; const b = items[index + 1]
+    // Les deux doivent être des exercices simples
+    if (a.type !== 'exercise' || b.type !== 'exercise') return
+    const slotA = { exerciseId: a.exerciseId, sets: a.sets, reps: a.reps, rest: a.rest }
+    const slotB = { exerciseId: b.exerciseId, sets: b.sets, reps: b.reps, rest: b.rest }
+    const next = [...items]
+    next.splice(index, 2, makeSuperset(slotA, slotB))
+    setItems(next)
+  }
+
+  /** Ajoute un exercice supplémentaire dans un superset existant */
+  function addSlotToSuperset(superIndex) {
+    if (!exercises.length) return
+    setItems(items.map((item, i) => {
+      if (i !== superIndex || item.type !== 'superset') return item
+      return { ...item, exercises: [...item.exercises, { exerciseId: exercises[0]?.id || '', ...emptyExercise }] }
+    }))
+  }
+
+  /** Supprime un slot individuel d'un superset (ou dissout le superset si < 2 slots) */
+  function removeSlotFromSuperset(superIndex, slotIndex) {
+    setItems(items.map((item, i) => {
+      if (i !== superIndex || item.type !== 'superset') return item
+      const next = item.exercises.filter((_, j) => j !== slotIndex)
+      if (next.length <= 1) {
+        // Dissoudre le superset → le transformer en exercice simple
+        const solo = next[0] || { exerciseId: exercises[0]?.id || '', ...emptyExercise }
+        return { type: 'exercise', ...solo }
+      }
+      return { ...item, exercises: next }
+    }))
+  }
+
+  /** Met à jour un champ d'un exercice simple */
+  function changeSimple(index, key, value) {
+    setItems(items.map((item, i) =>
+      i === index && item.type === 'exercise'
+        ? { ...item, [key]: key === 'exerciseId' ? value : Number(value) }
+        : item
+    ))
+  }
+
+  /** Met à jour un champ d'un slot dans un superset */
+  function changeSuperset(superIndex, slotIndex, key, value) {
+    setItems(items.map((item, i) => {
+      if (i !== superIndex || item.type !== 'superset') return item
+      const updatedExercises = item.exercises.map((slot, j) =>
+        j === slotIndex ? { ...slot, [key]: key === 'exerciseId' ? value : Number(value) } : slot
+      )
+      return { ...item, exercises: updatedExercises }
+    }))
+  }
+
+  async function save(event) {
+    event.preventDefault()
+    if (!name.trim() || !items.length) { setNotice('Indique un nom et au moins un exercice.'); return }
+    await onSave({ name: name.trim(), exercises: items })
+  }
+
+  return (
+    <Page title={initial ? 'Modifier la séance' : 'Nouvelle séance'} back={onClose}>
+      <form className="stack" onSubmit={save}>
+        <label>Nom de la séance
+          <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Push, jambes..." />
+        </label>
+
+        {items.map((item, index) => {
+          if (item.type === 'superset') {
+            return (
+              <div className="card exercise-config superset-card" key={`ss-${index}`}>
+                <div className="config-head">
+                  <span className="superset-badge"><Link2 size={13} /> Superset</span>
+                  <button type="button" onClick={() => removeItem(index)}><X size={18} /></button>
+                </div>
+                {item.exercises.map((slot, slotIdx) => (
+                  <div key={slotIdx} className="superset-slot-wrap">
+                    <ExerciseSlot
+                      item={slot}
+                      label={String.fromCharCode(65 + slotIdx) /* A, B, C… */}
+                      exercises={exercises}
+                      onChange={(key, val) => changeSuperset(index, slotIdx, key, val)}
+                    />
+                    {item.exercises.length > 2 && (
+                      <button type="button" className="remove-slot-btn" onClick={() => removeSlotFromSuperset(index, slotIdx)}>
+                        <X size={14} />
+                      </button>
+                    )}
+                    {slotIdx < item.exercises.length - 1 && <div className="superset-divider" />}
+                  </div>
+                ))}
+                <button type="button" className="add-slot-btn" onClick={() => addSlotToSuperset(index)}>
+                  <Plus size={14} /> Ajouter un exercice au superset
+                </button>
+              </div>
+            )
+          }
+
+          // Exercice simple
+          return (
+            <div className="card exercise-config" key={`ex-${index}`}>
+              <div className="config-head">
+                <strong>Exercice {index + 1}</strong>
+                <div className="config-actions">
+                  {/* Bouton "Lier en superset" avec l'exercice suivant si simple */}
+                  {index < items.length - 1 && items[index + 1]?.type === 'exercise' && (
+                    <button
+                      type="button"
+                      className="link-superset-btn"
+                      title="Lier avec l'exercice suivant en superset"
+                      onClick={() => mergeAsSuperset(index)}
+                    >
+                      <Link2 size={15} /> Superset
+                    </button>
+                  )}
+                  <button type="button" onClick={() => removeItem(index)}><X size={18} /></button>
+                </div>
+              </div>
+              <ExerciseSlot
+                item={item}
+                label=""
+                exercises={exercises}
+                onChange={(key, val) => changeSimple(index, key, val)}
+              />
+            </div>
+          )
+        })}
+
+        <Button type="button" variant="secondary" disabled={items.length >= 10 || !exercises.length} onClick={addSimple}>
+          <Plus size={18} /> Ajouter un exercice
+        </Button>
+        <Button>Enregistrer la séance <Check size={18} /></Button>
+      </form>
+    </Page>
+  )
 }
 
+/* ─────────────────────────── SÉANCES ─────────────────────────── */
 function Sessions({ uid, sessions, exercises, refresh, setNotice, startSession }) {
   const [editing, setEditing] = useState(undefined)
-  async function save(data) {
-    try { if (editing?.id) await updateUserData('sessions', editing.id, data); else if (sessions.length >= 10) { setNotice('Maximum de 10 séances atteint.'); return } else await createUserData('sessions', uid, data); setEditing(undefined); await refresh() }
-    catch { setNotice('Impossible d’enregistrer cette séance.') }
+
+  /** Compte le nombre d'exercices (en développant les supersets) */
+  function countExercises(session) {
+    return (session.exercises || []).reduce((acc, item) =>
+      item.type === 'superset' ? acc + item.exercises.length : acc + 1, 0)
   }
-  async function remove(id) { if (!window.confirm('Supprimer cette séance ?')) return; try { await deleteUserData('sessions', id); await refresh() } catch { setNotice('Impossible de supprimer cette séance.') } }
-  if (editing !== undefined) return <SessionEditor initial={editing} exercises={exercises} onClose={() => setEditing(undefined)} onSave={save} setNotice={setNotice} />
-  return <Page title="Séances" subtitle={`${sessions.length}/10 modèles`}><Button onClick={() => setEditing(null)}><Plus size={18} /> Nouvelle séance</Button><div className="list session-list">{sessions.map((session) => <div className="card session-card" key={session.id}><div><h3>{session.name}</h3><p>{session.exercises?.length || 0} exercices</p></div><div className="row-actions"><button onClick={() => startSession(session)} title="Lancer"><ChevronRight /></button><button onClick={() => setEditing(session)}><Edit3 size={17} /></button><button onClick={() => remove(session.id)}><Trash2 size={17} /></button></div></div>)}</div>{!sessions.length && <Empty text="Crée un modèle pour ta prochaine séance." />}</Page>
+
+  async function save(data) {
+    try {
+      if (editing?.id) await updateUserData('sessions', editing.id, data)
+      else if (sessions.length >= 10) { setNotice('Maximum de 10 séances atteint.'); return }
+      else await createUserData('sessions', uid, data)
+      setEditing(undefined); await refresh()
+    } catch { setNotice('Impossible d\u2019enregistrer cette séance.') }
+  }
+  async function remove(id) {
+    if (!window.confirm('Supprimer cette séance ?')) return
+    try { await deleteUserData('sessions', id); await refresh() }
+    catch { setNotice('Impossible de supprimer cette séance.') }
+  }
+
+  if (editing !== undefined) return (
+    <SessionEditor initial={editing} exercises={exercises} onClose={() => setEditing(undefined)} onSave={save} setNotice={setNotice} />
+  )
+  return (
+    <Page title="Séances" subtitle={`${sessions.length}/10 modèles`}>
+      <Button onClick={() => setEditing(null)}><Plus size={18} /> Nouvelle séance</Button>
+      <div className="list session-list">
+        {sessions.map((session) => (
+          <div className="card session-card" key={session.id}>
+            <div>
+              <h3>{session.name}</h3>
+              <p>{countExercises(session)} exercice{countExercises(session) > 1 ? 's' : ''}{(session.exercises || []).some((i) => i.type === 'superset') ? ' · supersets' : ''}</p>
+            </div>
+            <div className="row-actions">
+              <button onClick={() => startSession(session)} title="Lancer"><ChevronRight /></button>
+              <button onClick={() => setEditing(session)}><Edit3 size={17} /></button>
+              <button onClick={() => remove(session.id)}><Trash2 size={17} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+      {!sessions.length && <Empty text="Crée un modèle pour ta prochaine séance." />}
+    </Page>
+  )
 }
 
+/* ─────────────────────────── ACTIVE WORKOUT ─────────────────── */
 function readActiveWorkout(uid) {
   try {
     const stored = window.localStorage.getItem(`active-workout:${uid}`)
     return stored ? JSON.parse(stored) : null
-  } catch {
-    return null
-  }
+  } catch { return null }
+}
+
+/**
+ * Aplatit la liste d'items (exercices simples + supersets) en une liste
+ * de slots individuels avec leur clé unique et leur label d'affichage.
+ * Chaque slot a : { key, exerciseId, sets, reps, rest, supersetGroup }
+ */
+function flattenItems(items) {
+  const slots = []
+  items.forEach((item, itemIdx) => {
+    if (item.type === 'superset') {
+      item.exercises.forEach((slot, slotIdx) => {
+        slots.push({
+          key: `${itemIdx}-${slotIdx}`,
+          exerciseId: slot.exerciseId,
+          sets: slot.sets,
+          reps: slot.reps,
+          rest: slot.rest,
+          supersetGroup: itemIdx,
+          supersetLabel: String.fromCharCode(65 + slotIdx),
+          isSuperset: true,
+          isFirstInGroup: slotIdx === 0,
+          isLastInGroup: slotIdx === item.exercises.length - 1,
+        })
+      })
+    } else {
+      slots.push({
+        key: `${itemIdx}`,
+        exerciseId: item.exerciseId,
+        sets: item.sets,
+        reps: item.reps,
+        rest: item.rest,
+        supersetGroup: null,
+        isSuperset: false,
+      })
+    }
+  })
+  return slots
 }
 
 function Today({ sessions, exercises, history, uid, setNotice, refreshHistory, initialSession }) {
@@ -76,50 +404,310 @@ function Today({ sessions, exercises, history, uid, setNotice, refreshHistory, i
   const [active, setActive] = useState(restoredState?.active ?? null)
   const [completed, setCompleted] = useState(restoredState?.completed || {})
   const [weights, setWeights] = useState(restoredState?.weights || {})
+
   const exerciseName = (id) => exercises.find((item) => item.id === id)?.name || 'Exercice supprimé'
-  const maxHistory = (exerciseId) => Math.max(0, ...history.flatMap((session) => session.exercises?.filter((item) => item.exerciseId === exerciseId).flatMap((item) => item.weights || []) || []))
+  const maxHistory = (exerciseId) =>
+    Math.max(0, ...history.flatMap((session) =>
+      (session.exercises || []).flatMap((item) => {
+        if (item.type === 'superset') {
+          return item.exercises.filter((s) => s.exerciseId === exerciseId).flatMap((s) => s.weights || [])
+        }
+        return item.exerciseId === exerciseId ? (item.weights || []) : []
+      })
+    ))
+
   useEffect(() => {
     if (selected) window.localStorage.setItem(`active-workout:${uid}`, JSON.stringify({ selected, active, completed, weights }))
   }, [uid, selected, active, completed, weights])
+
   function launch(session) { setSelected(session); setActive(null); setCompleted({}); setWeights({}) }
-  function finishExercise(item, index) { const values = Array.from({ length: item.sets }, (_, set) => Number(weights[`${index}-${set}`] || 0)); setWeights({ ...weights, [`done-${index}`]: values }); setCompleted({ ...completed, [index]: true }); setActive(null) }
-  async function finishSession() {
-    try { await createUserData('history', uid, { sessionName: selected.name, date: new Date().toISOString(), exercises: selected.exercises.map((item, index) => ({ ...item, weights: weights[`done-${index}`] || [] })) }); window.localStorage.removeItem(`active-workout:${uid}`); await refreshHistory(); setSelected(null); setActive(null); setCompleted({}); setWeights({}); setNotice('Séance enregistrée.') }
-    catch { setNotice('Impossible d’enregistrer la séance.') }
+
+  const slots = selected ? flattenItems(selected.exercises || []) : []
+
+  function finishSlot(slot) {
+    const values = Array.from({ length: slot.sets }, (_, set) => Number(weights[`${slot.key}-${set}`] || 0))
+    setWeights({ ...weights, [`done-${slot.key}`]: values })
+    setCompleted({ ...completed, [slot.key]: true })
+    setActive(null)
   }
-  function cancelSession() { window.localStorage.removeItem(`active-workout:${uid}`); setSelected(null); setActive(null); setCompleted({}); setWeights({}) }
-  if (!selected) return <Page title="Aujourd’hui" subtitle="Prêt quand tu l’es">{!sessions.length && <Empty text="Crée d’abord un modèle de séance." />}<div className="list">{sessions.map((session) => <button className="card start-card" key={session.id} onClick={() => launch(session)}><div><span className="eyebrow">MODÈLE</span><h3>{session.name}</h3><p>{session.exercises?.length || 0} exercices</p></div><ChevronRight /></button>)}</div></Page>
-  return <Page title={selected.name} subtitle="Séance en cours" back={() => setSelected(null)}><div className="pb-8"><div className="list workout-list gap-4">{selected.exercises.map((item, index) => <div className={`card workout-row ${completed[index] ? 'completed' : ''}`} key={index}><div><h3>{exerciseName(item.exerciseId)}</h3><p>{item.sets} séries · {item.reps} reps · {item.rest}s repos</p></div>{completed[index] ? <Check className="success" /> : <Button onClick={() => setActive(index)}>Lancer</Button>}</div>)}</div>{active !== null && <div className="modal-backdrop"><div className="card modal"><button className="modal-close" onClick={() => setActive(null)}><X /></button><p className="eyebrow">EN COURS</p><h2>{exerciseName(selected.exercises[active].exerciseId)}</h2><p className="muted">Poids max historique : <strong>{maxHistory(selected.exercises[active].exerciseId) || '—'} kg</strong></p><div className="weights">{Array.from({ length: selected.exercises[active].sets }, (_, set) => <label key={set}>Série {set + 1}<input type="number" min="0" step="0.5" value={weights[`${active}-${set}`] || ''} onChange={(e) => setWeights({ ...weights, [`${active}-${set}`]: e.target.value })} placeholder="kg" /></label>)}</div><Button onClick={() => finishExercise(selected.exercises[active], active)}>Fini <Check size={18} /></Button></div></div>}{Object.keys(completed).length > 0 && <Button className="finish-session mt-6" onClick={finishSession}>Finir la séance</Button>}<Button type="button" variant="secondary" className="cancel-session mt-6" onClick={cancelSession}>Annuler la séance</Button></div></Page>
+
+  async function finishSession() {
+    try {
+      // On sauvegarde les poids dans la structure d'origine
+      const enrichedExercises = (selected.exercises || []).map((item, itemIdx) => {
+        if (item.type === 'superset') {
+          return {
+            ...item,
+            exercises: item.exercises.map((slot, slotIdx) => ({
+              ...slot,
+              weights: weights[`done-${itemIdx}-${slotIdx}`] || [],
+            })),
+          }
+        }
+        return { ...item, weights: weights[`done-${itemIdx}`] || [] }
+      })
+      await createUserData('history', uid, {
+        sessionName: selected.name,
+        date: new Date().toISOString(),
+        exercises: enrichedExercises,
+      })
+      window.localStorage.removeItem(`active-workout:${uid}`)
+      await refreshHistory()
+      setSelected(null); setActive(null); setCompleted({}); setWeights({})
+      setNotice('Séance enregistrée.')
+    } catch { setNotice('Impossible d\u2019enregistrer la séance.') }
+  }
+
+  function cancelSession() {
+    window.localStorage.removeItem(`active-workout:${uid}`)
+    setSelected(null); setActive(null); setCompleted({}); setWeights({})
+  }
+
+  if (!selected) return (
+    <Page title="Aujourd'hui" subtitle="Prêt quand tu l'es">
+      {!sessions.length && <Empty text="Crée d'abord un modèle de séance." />}
+      <div className="list">
+        {sessions.map((session) => (
+          <button className="card start-card" key={session.id} onClick={() => launch(session)}>
+            <div>
+              <span className="eyebrow">MODÈLE</span>
+              <h3>{session.name}</h3>
+              <p>{(session.exercises || []).length} blocs</p>
+            </div>
+            <ChevronRight />
+          </button>
+        ))}
+      </div>
+    </Page>
+  )
+
+  const activeSlot = active !== null ? slots.find((s) => s.key === active) : null
+
+  return (
+    <Page title={selected.name} subtitle="Séance en cours" back={() => setSelected(null)}>
+      <div className="pb-8">
+        <div className="list workout-list gap-4">
+          {slots.map((slot) => {
+            const done = completed[slot.key]
+            const isFirst = slot.isFirstInGroup
+            const isLast = slot.isLastInGroup
+            return (
+              <div
+                key={slot.key}
+                className={[
+                  'card workout-row',
+                  done ? 'completed' : '',
+                  slot.isSuperset ? 'superset-row' : '',
+                  slot.isSuperset && isFirst ? 'superset-row-first' : '',
+                  slot.isSuperset && isLast ? 'superset-row-last' : '',
+                  slot.isSuperset && !isFirst && !isLast ? 'superset-row-mid' : '',
+                ].join(' ')}
+              >
+                <div>
+                  {slot.isSuperset && <span className="superset-pill"><Link2 size={11} /> SS {slot.supersetLabel}</span>}
+                  <h3>{exerciseName(slot.exerciseId)}</h3>
+                  <p>{slot.sets} séries · {slot.reps} reps · {slot.rest}s repos</p>
+                </div>
+                {done ? <Check className="success" /> : <Button onClick={() => setActive(slot.key)}>Lancer</Button>}
+              </div>
+            )
+          })}
+        </div>
+
+        {active !== null && activeSlot && (
+          <div className="modal-backdrop">
+            <div className="card modal">
+              <button className="modal-close" onClick={() => setActive(null)}><X /></button>
+              {activeSlot.isSuperset && <p className="eyebrow superset-eyebrow"><Link2 size={12} /> SUPERSET {activeSlot.supersetLabel}</p>}
+              <p className="eyebrow">{activeSlot.isSuperset ? '' : 'EN COURS'}</p>
+              <h2>{exerciseName(activeSlot.exerciseId)}</h2>
+              <p className="muted">Poids max historique : <strong>{maxHistory(activeSlot.exerciseId) || '—'} kg</strong></p>
+              <div className="weights">
+                {Array.from({ length: activeSlot.sets }, (_, set) => (
+                  <label key={set}>
+                    Série {set + 1}
+                    <input
+                      type="number" min="0" step="0.5"
+                      value={weights[`${activeSlot.key}-${set}`] || ''}
+                      onChange={(e) => setWeights({ ...weights, [`${activeSlot.key}-${set}`]: e.target.value })}
+                      placeholder="kg"
+                    />
+                  </label>
+                ))}
+              </div>
+              <Button onClick={() => finishSlot(activeSlot)}>Fini <Check size={18} /></Button>
+            </div>
+          </div>
+        )}
+
+        {Object.keys(completed).length > 0 && (
+          <Button className="finish-session mt-6" onClick={finishSession}>Finir la séance</Button>
+        )}
+        <Button type="button" variant="secondary" className="cancel-session mt-6" onClick={cancelSession}>Annuler la séance</Button>
+      </div>
+    </Page>
+  )
 }
 
+/* ─────────────────────────── STATS ─────────────────────────── */
 function Stats({ exercises, history }) {
   const rows = exercises.map((exercise) => {
-    const entries = history.flatMap((session) => session.exercises?.filter((item) => item.exerciseId === exercise.id).map((item) => ({ ...item, date: session.date })) || [])
+    const entries = history.flatMap((session) =>
+      (session.exercises || []).flatMap((item) => {
+        if (item.type === 'superset') {
+          return item.exercises
+            .filter((s) => s.exerciseId === exercise.id)
+            .map((s) => ({ ...s, date: session.date }))
+        }
+        return item.exerciseId === exercise.id ? [{ ...item, date: session.date }] : []
+      })
+    )
     const values = entries.flatMap((item) => item.weights || [])
     const lastEntry = [...entries].sort((a, b) => new Date(b.date) - new Date(a.date))[0]
     const lastWeights = lastEntry?.weights || []
     return { ...exercise, pr: Math.max(0, ...values), last: Math.max(0, ...lastWeights) }
   }).filter((row) => row.pr || row.last)
-  return <Page title="Stats" subtitle="Tes repères"><div className="list">{rows.map((row) => <div className="card stat-row" key={row.id}><div><h3>{row.name}</h3><p>Dernière séance : {row.last} kg</p></div><strong>{row.pr}<small> kg PR</small></strong></div>)}</div>{!rows.length && <Empty text="Tes performances apparaîtront après ta première séance." />}</Page>
+  return (
+    <Page title="Stats" subtitle="Tes repères">
+      <div className="list">
+        {rows.map((row) => (
+          <div className="card stat-row" key={row.id}>
+            <div><h3>{row.name}</h3><p>Dernière séance : {row.last} kg</p></div>
+            <strong>{row.pr}<small> kg PR</small></strong>
+          </div>
+        ))}
+      </div>
+      {!rows.length && <Empty text="Tes performances apparaîtront après ta première séance." />}
+    </Page>
+  )
 }
 
+/* ─────────────────────────── COMPTE ─────────────────────────── */
 function Account({ user, history, exercises }) {
   const [openId, setOpenId] = useState(null)
   const [isHelpOpen, setIsHelpOpen] = useState(false)
   const exerciseName = (exerciseId) => exercises.find((exercise) => exercise.id === exerciseId)?.name || 'Exercice supprimé'
   function toggleSession(id) { setOpenId((current) => current === id ? null : id) }
 
-  return <Page title="Compte" subtitle="Ton espace privé"><div className="card profile"><div className="avatar"><UserRound /></div><div><h3>{user.email}</h3><p>Membre du groupe privé</p></div><Button variant="secondary" onClick={() => signOut(auth)}><LogOut size={17} /> Quitter</Button></div><button className="card help-card" onClick={() => setIsHelpOpen(true)}><span><Info size={19} /><strong>Comment fonctionne l’application ?</strong></span><ChevronRight size={18} className="muted" /></button><h2 className="section-title">Historique</h2><div className="list">{history.map((item) => {
-    const isOpen = openId === item.id
-    return <div className={`card history-card ${isOpen ? 'history-card-open' : ''}`} key={item.id}><button className="history-row" onClick={() => toggleSession(item.id)} aria-expanded={isOpen}><div><h3>{item.sessionName}</h3><p>{dateLabel(item.date)}</p></div><ChevronRight size={18} className={`history-chevron ${isOpen ? 'history-chevron-open' : ''}`} /></button>{isOpen && <div className="history-details">{item.exercises?.map((exercise, index) => <div className="history-exercise" key={`${exercise.exerciseId}-${index}`}><div className="history-exercise-header"><h3>{exerciseName(exercise.exerciseId)}</h3><span>{exercise.sets} séries prévues</span></div><div className="history-sets">{(exercise.weights || []).map((weight, setIndex) => <div className="history-set" key={setIndex}><span>Série {setIndex + 1}</span><strong>{weight || 0} kg</strong></div>)}</div>{!exercise.weights?.length && <p className="muted">Aucun poids enregistré.</p>}</div>)}</div>}</div>
-  })}</div>{!history.length && <Empty text="Aucune séance enregistrée." />}{isHelpOpen && <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="help-title"><div className="card modal help-modal"><button className="modal-close" onClick={() => setIsHelpOpen(false)} aria-label="Fermer"><X /></button><p className="eyebrow">GUIDE DE DÉMARRAGE</p><h2 id="help-title">Comment fonctionne l’application ?</h2><div className="help-steps"><section><span>1</span><div><h3>Les Exercices</h3><p>Allez d’abord dans l’onglet « Exercices » pour ajouter vos mouvements, par exemple Développé couché ou Curl haltères.</p></div></section><section><span>2</span><div><h3>Les Séances</h3><p>Allez dans l’onglet « Séances » pour créer vos modèles, comme Push, Pull ou Legs, en y piochant les exercices créés à l’étape 1.</p></div></section><section><span>3</span><div><h3>L’entraînement</h3><p>Lancez votre séance depuis l’onglet « Aujourd’hui ». Validez les exercices dans l’ordre que vous voulez selon les machines disponibles. Validez chaque série : vos poids et vos PR seront automatiquement sauvegardés pour la prochaine fois.</p></div></section></div></div></div>}</Page>
+  function renderHistoryItem(item, index) {
+    if (item.type === 'superset') {
+      return (
+        <div className="history-exercise history-superset" key={`ss-${index}`}>
+          <div className="history-exercise-header">
+            <span className="superset-badge-sm"><Link2 size={11} /> Superset</span>
+          </div>
+          {item.exercises.map((slot, slotIdx) => (
+            <div key={slotIdx} className="history-superset-slot">
+              <div className="history-exercise-header">
+                <h3>{exerciseName(slot.exerciseId)}</h3>
+                <span>{slot.sets} séries prévues</span>
+              </div>
+              <div className="history-sets">
+                {(slot.weights || []).map((weight, setIndex) => (
+                  <div className="history-set" key={setIndex}><span>Série {setIndex + 1}</span><strong>{weight || 0} kg</strong></div>
+                ))}
+              </div>
+              {!slot.weights?.length && <p className="muted">Aucun poids enregistré.</p>}
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return (
+      <div className="history-exercise" key={`ex-${item.exerciseId}-${index}`}>
+        <div className="history-exercise-header">
+          <h3>{exerciseName(item.exerciseId)}</h3>
+          <span>{item.sets} séries prévues</span>
+        </div>
+        <div className="history-sets">
+          {(item.weights || []).map((weight, setIndex) => (
+            <div className="history-set" key={setIndex}><span>Série {setIndex + 1}</span><strong>{weight || 0} kg</strong></div>
+          ))}
+        </div>
+        {!item.weights?.length && <p className="muted">Aucun poids enregistré.</p>}
+      </div>
+    )
+  }
+
+  return (
+    <Page title="Compte" subtitle="Ton espace privé">
+      <div className="card profile">
+        <div className="avatar"><UserRound /></div>
+        <div><h3>{user.email}</h3><p>Membre du groupe privé</p></div>
+        <Button variant="secondary" onClick={() => signOut(auth)}><LogOut size={17} /> Quitter</Button>
+      </div>
+      <button className="card help-card" onClick={() => setIsHelpOpen(true)}>
+        <span><Info size={19} /><strong>Comment fonctionne l'application ?</strong></span>
+        <ChevronRight size={18} className="muted" />
+      </button>
+      <h2 className="section-title">Historique</h2>
+      <div className="list">
+        {history.map((item) => {
+          const isOpen = openId === item.id
+          return (
+            <div className={`card history-card ${isOpen ? 'history-card-open' : ''}`} key={item.id}>
+              <button className="history-row" onClick={() => toggleSession(item.id)} aria-expanded={isOpen}>
+                <div><h3>{item.sessionName}</h3><p>{dateLabel(item.date)}</p></div>
+                <ChevronRight size={18} className={`history-chevron ${isOpen ? 'history-chevron-open' : ''}`} />
+              </button>
+              {isOpen && (
+                <div className="history-details">
+                  {item.exercises?.map((exercise, index) => renderHistoryItem(exercise, index))}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      {!history.length && <Empty text="Aucune séance enregistrée." />}
+      {isHelpOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="help-title">
+          <div className="card modal help-modal">
+            <button className="modal-close" onClick={() => setIsHelpOpen(false)} aria-label="Fermer"><X /></button>
+            <p className="eyebrow">GUIDE DE DÉMARRAGE</p>
+            <h2 id="help-title">Comment fonctionne l'application ?</h2>
+            <div className="help-steps">
+              <section><span>1</span><div><h3>Les Exercices</h3><p>Allez d'abord dans l'onglet « Exercices » pour ajouter vos mouvements, par exemple Développé couché ou Curl haltères.</p></div></section>
+              <section><span>2</span><div><h3>Les Séances</h3><p>Allez dans l'onglet « Séances » pour créer vos modèles, comme Push, Pull ou Legs, en y piochant les exercices créés à l'étape 1.</p></div></section>
+              <section><span>3</span><div><h3>L'entraînement</h3><p>Lancez votre séance depuis l'onglet « Aujourd'hui ». Validez les exercices dans l'ordre que vous voulez selon les machines disponibles. Validez chaque série : vos poids et vos PR seront automatiquement sauvegardés pour la prochaine fois.</p></div></section>
+            </div>
+          </div>
+        </div>
+      )}
+    </Page>
+  )
 }
-function Page({ title, subtitle, back, children }) { return <main className="page"><header className="page-header">{back && <button className="back" onClick={back}><ArrowLeft size={20} /></button>}<div><p className="eyebrow">{subtitle}</p><h1>{title}</h1></div></header>{children}</main> }
+
+/* ─────────────────────────── LAYOUT ─────────────────────────── */
+function Page({ title, subtitle, back, children }) {
+  return (
+    <main className="page">
+      <header className="page-header">
+        {back && <button className="back" onClick={back}><ArrowLeft size={20} /></button>}
+        <div><p className="eyebrow">{subtitle}</p><h1>{title}</h1></div>
+      </header>
+      {children}
+    </main>
+  )
+}
 function Empty({ text }) { return <div className="empty"><Dumbbell size={24} /><p>{text}</p></div> }
 
+/* ─────────────────────────── APP ROOT ─────────────────────────── */
 function App() {
-  const [user, setUser] = useState(undefined); const [tab, setTab] = useState('today'); const [start, setStart] = useState(null); const [exercises, setExercises] = useState([]); const [sessions, setSessions] = useState([]); const [history, setHistory] = useState([]); const [notice, setNotice] = useState('')
-  const refresh = async () => { if (!auth.currentUser) return; const uid = auth.currentUser.uid; const [e, s, h] = await Promise.all([listUserData('exercises', uid), listUserData('sessions', uid), listUserData('history', uid)]); setExercises(e); setSessions(s); setHistory(h.sort((a, b) => new Date(b.date) - new Date(a.date))) }
+  const [user, setUser] = useState(undefined)
+  const [tab, setTab] = useState('today')
+  const [start, setStart] = useState(null)
+  const [exercises, setExercises] = useState([])
+  const [sessions, setSessions] = useState([])
+  const [history, setHistory] = useState([])
+  const [notice, setNotice] = useState('')
+
+  const refresh = async () => {
+    if (!auth.currentUser) return
+    const uid = auth.currentUser.uid
+    const [e, s, h] = await Promise.all([listUserData('exercises', uid), listUserData('sessions', uid), listUserData('history', uid)])
+    setExercises(e); setSessions(s); setHistory(h.sort((a, b) => new Date(b.date) - new Date(a.date)))
+  }
   useEffect(() => onAuthStateChanged(auth, (next) => setUser(next || null)), [])
   useEffect(() => {
     if (!user) return undefined
@@ -132,7 +720,12 @@ function App() {
       .catch(() => { if (active) setNotice('Impossible de charger tes données.') })
     return () => { active = false }
   }, [user])
-  useEffect(() => { if (!notice) return undefined; const timer = setTimeout(() => setNotice(''), 3500); return () => clearTimeout(timer) }, [notice])
+  useEffect(() => {
+    if (!notice) return undefined
+    const timer = setTimeout(() => setNotice(''), 3500)
+    return () => clearTimeout(timer)
+  }, [notice])
+
   const content = useMemo(() => {
     if (!user) return null
     const props = { uid: user.uid, exercises, sessions, history, refresh, setNotice, refreshHistory: refresh }
@@ -142,8 +735,22 @@ function App() {
     if (tab === 'account') return <Account {...props} user={user} />
     return <Today {...props} initialSession={start} />
   }, [tab, user, exercises, sessions, history, start])
+
   if (user === undefined) return <div className="loading">Chargement...</div>
   if (!user) return <AuthScreen />
-  return <div className="app-shell pt-[env(safe-area-inset-top)]">{content}{notice && <div className="toast">{notice}</div>}<nav className="bottom-nav mx-4 mb-6 rounded-3xl border border-gray-800 shadow-xl py-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">{tabs.map(({ id, label, icon: Icon }) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setStart(null); setTab(id) }}><Icon size={20} strokeWidth={tab === id ? 2.5 : 1.8} /><span>{label}</span></button>)}</nav></div>
+  return (
+    <div className="app-shell pt-[env(safe-area-inset-top)]">
+      {content}
+      {notice && <div className="toast">{notice}</div>}
+      <nav className="bottom-nav mx-4 mb-6 rounded-3xl border border-gray-800 shadow-xl py-3 pb-[calc(env(safe-area-inset-bottom)+1.5rem)]">
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button key={id} className={tab === id ? 'active' : ''} onClick={() => { setStart(null); setTab(id) }}>
+            <Icon size={20} strokeWidth={tab === id ? 2.5 : 1.8} />
+            <span>{label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  )
 }
 export default App
