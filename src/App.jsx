@@ -361,79 +361,171 @@ function readActiveWorkout(uid) {
 }
 
 /**
- * Aplatit la liste d'items (exercices simples + supersets) en une liste
- * de slots individuels avec leur clé unique et leur label d'affichage.
- * Chaque slot a : { key, exerciseId, sets, reps, rest, supersetGroup }
+ * Modale pour un exercice SIMPLE (comportement original).
+ * Poids stockés : weights[`simple-${itemIdx}-${setIdx}`]
+ * Résultat écrit : weights[`done-${itemIdx}`] = number[]
  */
-function flattenItems(items) {
-  const slots = []
-  items.forEach((item, itemIdx) => {
-    if (item.type === 'superset') {
-      item.exercises.forEach((slot, slotIdx) => {
-        slots.push({
-          key: `${itemIdx}-${slotIdx}`,
-          exerciseId: slot.exerciseId,
-          sets: slot.sets,
-          reps: slot.reps,
-          rest: slot.rest,
-          supersetGroup: itemIdx,
-          supersetLabel: String.fromCharCode(65 + slotIdx),
-          isSuperset: true,
-          isFirstInGroup: slotIdx === 0,
-          isLastInGroup: slotIdx === item.exercises.length - 1,
-        })
-      })
-    } else {
-      slots.push({
-        key: `${itemIdx}`,
-        exerciseId: item.exerciseId,
-        sets: item.sets,
-        reps: item.reps,
-        rest: item.rest,
-        supersetGroup: null,
-        isSuperset: false,
-      })
-    }
-  })
-  return slots
+function SimpleExerciseModal({ item, itemIdx, exerciseName, maxHistory, weights, setWeights, onFinish, onClose }) {
+  const name = exerciseName(item.exerciseId)
+  const pr = maxHistory(item.exerciseId)
+
+  function finish() {
+    const values = Array.from({ length: item.sets }, (_, set) =>
+      Number(weights[`simple-${itemIdx}-${set}`] || 0)
+    )
+    onFinish({ [`done-${itemIdx}`]: values })
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="card modal">
+        <button className="modal-close" onClick={onClose}><X /></button>
+        <p className="eyebrow">EN COURS</p>
+        <h2>{name}</h2>
+        <p className="muted">Poids max historique : <strong>{pr || '—'} kg</strong></p>
+        <div className="weights">
+          {Array.from({ length: item.sets }, (_, set) => (
+            <label key={set}>
+              Série {set + 1}
+              <input
+                type="number" min="0" step="0.5"
+                value={weights[`simple-${itemIdx}-${set}`] || ''}
+                onChange={(e) => setWeights((prev) => ({ ...prev, [`simple-${itemIdx}-${set}`]: e.target.value }))}
+                placeholder="kg"
+              />
+            </label>
+          ))}
+        </div>
+        <Button onClick={finish}>Fini <Check size={18} /></Button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Modale pour un SUPERSET — affichage par "Tours" (rounds).
+ *
+ * Chaque tour i contient un input par exercice du groupe,
+ * mais uniquement si cet exercice a encore des séries à faire (sets > i).
+ *
+ * Poids stockés : weights[`ss-${itemIdx}-${slotIdx}-${setIdx}`]
+ * Résultats écrits : weights[`done-${itemIdx}-${slotIdx}`] = number[]  (par slot)
+ */
+function SupersetModal({ item, itemIdx, exerciseName, maxHistory, weights, setWeights, onFinish, onClose }) {
+  // Nombre max de séries parmi tous les slots → nombre de tours
+  const maxSets = Math.max(...item.exercises.map((s) => s.sets))
+
+  function finish() {
+    // Construit done-X-Y pour chaque slot
+    const result = {}
+    item.exercises.forEach((slot, slotIdx) => {
+      result[`done-${itemIdx}-${slotIdx}`] = Array.from(
+        { length: slot.sets },
+        (_, set) => Number(weights[`ss-${itemIdx}-${slotIdx}-${set}`] || 0)
+      )
+    })
+    onFinish(result)
+  }
+
+  return (
+    <div className="modal-backdrop">
+      <div className="card modal modal-superset">
+        <button className="modal-close" onClick={onClose}><X /></button>
+        <p className="eyebrow superset-eyebrow"><Link2 size={12} /> SUPERSET EN COURS</p>
+        <h2 className="modal-superset-title">
+          {item.exercises.map((s) => exerciseName(s.exerciseId)).join(' + ')}
+        </h2>
+
+        <div className="rounds">
+          {Array.from({ length: maxSets }, (_, roundIdx) => {
+            // Exercices ayant encore une série à ce tour
+            const activeSlots = item.exercises.filter((s) => s.sets > roundIdx)
+            if (activeSlots.length === 0) return null
+            return (
+              <div className="round" key={roundIdx}>
+                <p className="round-label">Tour {roundIdx + 1}</p>
+                {item.exercises.map((slot, slotIdx) => {
+                  if (slot.sets <= roundIdx) return null // cet exo est terminé à ce tour
+                  const pr = maxHistory(slot.exerciseId)
+                  const weightKey = `ss-${itemIdx}-${slotIdx}-${roundIdx}`
+                  return (
+                    <div className="round-slot" key={slotIdx}>
+                      <div className="round-slot-header">
+                        <span className="round-slot-label">{String.fromCharCode(65 + slotIdx)}</span>
+                        <span className="round-slot-name">{exerciseName(slot.exerciseId)}</span>
+                        {pr > 0 && <span className="round-slot-pr">{pr} kg PR</span>}
+                      </div>
+                      <div className="round-slot-input">
+                        <input
+                          type="number" min="0" step="0.5"
+                          value={weights[weightKey] || ''}
+                          onChange={(e) => setWeights((prev) => ({ ...prev, [weightKey]: e.target.value }))}
+                          placeholder="kg"
+                        />
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+
+        <Button onClick={finish}>Fini <Check size={18} /></Button>
+      </div>
+    </div>
+  )
 }
 
 function Today({ sessions, exercises, history, uid, setNotice, refreshHistory, initialSession }) {
   const [restoredState] = useState(() => readActiveWorkout(uid))
   const [selected, setSelected] = useState(restoredState?.selected || initialSession || null)
+  // active = index dans selected.exercises (number | null)
   const [active, setActive] = useState(restoredState?.active ?? null)
+  // completed = { [itemIdx]: true }
   const [completed, setCompleted] = useState(restoredState?.completed || {})
+  // weights = clé plate (voir modales) → valeur string
   const [weights, setWeights] = useState(restoredState?.weights || {})
 
   const exerciseName = (id) => exercises.find((item) => item.id === id)?.name || 'Exercice supprimé'
+
+  /** Meilleur poids historique toutes séances confondues pour un exercice donné */
   const maxHistory = (exerciseId) =>
     Math.max(0, ...history.flatMap((session) =>
       (session.exercises || []).flatMap((item) => {
         if (item.type === 'superset') {
-          return item.exercises.filter((s) => s.exerciseId === exerciseId).flatMap((s) => s.weights || [])
+          return item.exercises
+            .filter((s) => s.exerciseId === exerciseId)
+            .flatMap((s) => s.weights || [])
         }
         return item.exerciseId === exerciseId ? (item.weights || []) : []
       })
     ))
 
+  // Persistance localStorage à chaque changement de state
   useEffect(() => {
-    if (selected) window.localStorage.setItem(`active-workout:${uid}`, JSON.stringify({ selected, active, completed, weights }))
+    if (selected) {
+      window.localStorage.setItem(
+        `active-workout:${uid}`,
+        JSON.stringify({ selected, active, completed, weights })
+      )
+    }
   }, [uid, selected, active, completed, weights])
 
   function launch(session) { setSelected(session); setActive(null); setCompleted({}); setWeights({}) }
 
-  const slots = selected ? flattenItems(selected.exercises || []) : []
-
-  function finishSlot(slot) {
-    const values = Array.from({ length: slot.sets }, (_, set) => Number(weights[`${slot.key}-${set}`] || 0))
-    setWeights({ ...weights, [`done-${slot.key}`]: values })
-    setCompleted({ ...completed, [slot.key]: true })
+  /**
+   * Appelé par une modale quand l'utilisateur clique "Fini".
+   * @param {object} doneEntries – paires { `done-X[-Y]`: number[] } à fusionner dans weights
+   */
+  function handleFinish(doneEntries) {
+    setWeights((prev) => ({ ...prev, ...doneEntries }))
+    setCompleted((prev) => ({ ...prev, [active]: true }))
     setActive(null)
   }
 
   async function finishSession() {
     try {
-      // On sauvegarde les poids dans la structure d'origine
       const enrichedExercises = (selected.exercises || []).map((item, itemIdx) => {
         if (item.type === 'superset') {
           return {
@@ -463,6 +555,7 @@ function Today({ sessions, exercises, history, uid, setNotice, refreshHistory, i
     setSelected(null); setActive(null); setCompleted({}); setWeights({})
   }
 
+  /* ── Écran de sélection de séance ── */
   if (!selected) return (
     <Page title="Aujourd'hui" subtitle="Prêt quand tu l'es">
       {!sessions.length && <Empty text="Crée d'abord un modèle de séance." />}
@@ -481,69 +574,97 @@ function Today({ sessions, exercises, history, uid, setNotice, refreshHistory, i
     </Page>
   )
 
-  const activeSlot = active !== null ? slots.find((s) => s.key === active) : null
+  const items = selected.exercises || []
+  const activeItem = active !== null ? items[active] : null
 
+  /* ── Séance en cours ── */
   return (
     <Page title={selected.name} subtitle="Séance en cours" back={() => setSelected(null)}>
       <div className="pb-8">
+
+        {/* ── Liste des blocs (1 carte par item, qu'il soit simple ou superset) ── */}
         <div className="list workout-list gap-4">
-          {slots.map((slot) => {
-            const done = completed[slot.key]
-            const isFirst = slot.isFirstInGroup
-            const isLast = slot.isLastInGroup
-            return (
-              <div
-                key={slot.key}
-                className={[
-                  'card workout-row',
-                  done ? 'completed' : '',
-                  slot.isSuperset ? 'superset-row' : '',
-                  slot.isSuperset && isFirst ? 'superset-row-first' : '',
-                  slot.isSuperset && isLast ? 'superset-row-last' : '',
-                  slot.isSuperset && !isFirst && !isLast ? 'superset-row-mid' : '',
-                ].join(' ')}
-              >
-                <div>
-                  {slot.isSuperset && <span className="superset-pill"><Link2 size={11} /> SS {slot.supersetLabel}</span>}
-                  <h3>{exerciseName(slot.exerciseId)}</h3>
-                  <p>{slot.sets} séries · {slot.reps} reps · {slot.rest}s repos</p>
+          {items.map((item, itemIdx) => {
+            const done = completed[itemIdx]
+
+            /* Exercice simple */
+            if (!item.type || item.type === 'exercise') {
+              return (
+                <div key={itemIdx} className={`card workout-row ${done ? 'completed' : ''}`}>
+                  <div>
+                    <h3>{exerciseName(item.exerciseId)}</h3>
+                    <p>{item.sets} séries · {item.reps} reps · {item.rest}s repos</p>
+                  </div>
+                  {done
+                    ? <Check className="success" />
+                    : <Button onClick={() => setActive(itemIdx)}>Lancer</Button>
+                  }
                 </div>
-                {done ? <Check className="success" /> : <Button onClick={() => setActive(slot.key)}>Lancer</Button>}
+              )
+            }
+
+            /* Superset → carte unifiée */
+            const totalSets = Math.max(...item.exercises.map((s) => s.sets))
+            return (
+              <div key={itemIdx} className={`card workout-row superset-unified-card ${done ? 'completed' : ''}`}>
+                <div className="superset-unified-body">
+                  <span className="superset-pill superset-pill-lg">
+                    <Link2 size={12} /> Superset · {totalSets} tours
+                  </span>
+                  <ul className="superset-exo-list">
+                    {item.exercises.map((slot, slotIdx) => (
+                      <li key={slotIdx}>
+                        <span className="superset-slot-letter">{String.fromCharCode(65 + slotIdx)}</span>
+                        <span className="superset-slot-exo-name">{exerciseName(slot.exerciseId)}</span>
+                        <span className="superset-slot-detail">{slot.sets}×{slot.reps}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {done
+                  ? <Check className="success superset-check" />
+                  : <Button onClick={() => setActive(itemIdx)}>Lancer le Superset</Button>
+                }
               </div>
             )
           })}
         </div>
 
-        {active !== null && activeSlot && (
-          <div className="modal-backdrop">
-            <div className="card modal">
-              <button className="modal-close" onClick={() => setActive(null)}><X /></button>
-              {activeSlot.isSuperset && <p className="eyebrow superset-eyebrow"><Link2 size={12} /> SUPERSET {activeSlot.supersetLabel}</p>}
-              <p className="eyebrow">{activeSlot.isSuperset ? '' : 'EN COURS'}</p>
-              <h2>{exerciseName(activeSlot.exerciseId)}</h2>
-              <p className="muted">Poids max historique : <strong>{maxHistory(activeSlot.exerciseId) || '—'} kg</strong></p>
-              <div className="weights">
-                {Array.from({ length: activeSlot.sets }, (_, set) => (
-                  <label key={set}>
-                    Série {set + 1}
-                    <input
-                      type="number" min="0" step="0.5"
-                      value={weights[`${activeSlot.key}-${set}`] || ''}
-                      onChange={(e) => setWeights({ ...weights, [`${activeSlot.key}-${set}`]: e.target.value })}
-                      placeholder="kg"
-                    />
-                  </label>
-                ))}
-              </div>
-              <Button onClick={() => finishSlot(activeSlot)}>Fini <Check size={18} /></Button>
-            </div>
-          </div>
+        {/* ── Modales d'exécution ── */}
+        {active !== null && activeItem && (
+          (!activeItem.type || activeItem.type === 'exercise')
+            ? (
+              <SimpleExerciseModal
+                item={activeItem}
+                itemIdx={active}
+                exerciseName={exerciseName}
+                maxHistory={maxHistory}
+                weights={weights}
+                setWeights={setWeights}
+                onFinish={handleFinish}
+                onClose={() => setActive(null)}
+              />
+            )
+            : (
+              <SupersetModal
+                item={activeItem}
+                itemIdx={active}
+                exerciseName={exerciseName}
+                maxHistory={maxHistory}
+                weights={weights}
+                setWeights={setWeights}
+                onFinish={handleFinish}
+                onClose={() => setActive(null)}
+              />
+            )
         )}
 
         {Object.keys(completed).length > 0 && (
           <Button className="finish-session mt-6" onClick={finishSession}>Finir la séance</Button>
         )}
-        <Button type="button" variant="secondary" className="cancel-session mt-6" onClick={cancelSession}>Annuler la séance</Button>
+        <Button type="button" variant="secondary" className="cancel-session mt-6" onClick={cancelSession}>
+          Annuler la séance
+        </Button>
       </div>
     </Page>
   )
