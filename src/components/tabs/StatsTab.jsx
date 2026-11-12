@@ -1,7 +1,12 @@
+import { useState } from 'react'
+import { TrendingUp } from 'lucide-react'
 import Page from '../common/Page'
 import Empty from '../common/Empty'
+import ExerciseChartModal from '../modals/ExerciseChartModal'
 
 export function StatsTab({ exercises, history }) {
+  const [selectedExercise, setSelectedExercise] = useState(null)
+
   const rows = exercises
     .map((exercise) => {
       const entries = history.flatMap((session) =>
@@ -25,9 +30,26 @@ export function StatsTab({ exercises, history }) {
     <Page title="Stats" subtitle="Tes repères">
       <div className="list">
         {rows.map((row) => (
-          <div className="card stat-row" key={row.id}>
+          <div
+            className="card stat-row cursor-pointer transition-all hover:border-zinc-500 active:scale-[0.99] group select-none"
+            key={row.id}
+            onClick={() => setSelectedExercise(row)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                setSelectedExercise(row)
+              }
+            }}
+          >
             <div>
-              <h3>{row.name}</h3>
+              <div className="flex items-center gap-2">
+                <h3 className="group-hover:text-white transition-colors">{row.name}</h3>
+                <TrendingUp
+                  size={15}
+                  className="text-zinc-500 group-hover:text-blue-400 transition-colors flex-shrink-0"
+                />
+              </div>
               <p>Dernière séance : {row.last} kg</p>
             </div>
             <strong>
@@ -37,10 +59,18 @@ export function StatsTab({ exercises, history }) {
           </div>
         ))}
       </div>
+
       {!rows.length && <Empty text="Tes performances apparaîtront après ta première séance." />}
+
+      {selectedExercise && (
+        <ExerciseChartModal
+          exercise={selectedExercise}
+          history={history}
+          onClose={() => setSelectedExercise(null)}
+        />
+      )}
     </Page>
   )
 }
 
 export default StatsTab
-
