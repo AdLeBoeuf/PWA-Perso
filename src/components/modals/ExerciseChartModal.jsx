@@ -226,3 +226,4 @@ export function ExerciseChartModal({ exercise, history, onClose }) {
 }
 
 export default ExerciseChartModal
+

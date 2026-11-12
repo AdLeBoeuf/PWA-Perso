@@ -239,3 +239,4 @@ export function ExerciseProgressionChart({ points }) {
 }
 
 export default ExerciseProgressionChart
+
