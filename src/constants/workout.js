@@ -6,3 +6,4 @@ export const makeExerciseItem = (exerciseId = '') => ({ type: 'exercise', exerci
 
 /** Crée un item "superset" avec les deux slots passés */
 export const makeSuperset = (a, b) => ({ type: 'superset', exercises: [a, b] })
+

@@ -20,3 +20,4 @@ export function Page({ title, subtitle, back, children }) {
 }
 
 export default Page
+

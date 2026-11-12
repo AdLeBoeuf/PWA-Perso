@@ -7,3 +7,4 @@ export const dateLabel = (value) =>
 
 export const errorLabel = (error) =>
   error?.code?.replace('auth/', '').replaceAll('-', ' ') || 'Une erreur est survenue.'
+

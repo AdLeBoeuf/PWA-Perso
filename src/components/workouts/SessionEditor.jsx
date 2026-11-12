@@ -217,3 +217,4 @@ export function SessionEditor({ initial, exercises, onClose, onSave, setNotice }
 }
 
 export default SessionEditor
+

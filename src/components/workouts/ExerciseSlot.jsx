@@ -51,3 +51,4 @@ export function ExerciseSlot({ item, label, onChange, exercises }) {
 }
 
 export default ExerciseSlot
+

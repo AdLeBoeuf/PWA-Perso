@@ -132,3 +132,4 @@ export function AccountTab({ user, history, exercises }) {
 }
 
 export default AccountTab
+

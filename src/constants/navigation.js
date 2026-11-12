@@ -7,3 +7,4 @@ export const tabs = [
   { id: 'stats', label: 'Stats', icon: BarChart3 },
   { id: 'account', label: 'Compte', icon: UserRound },
 ]
+

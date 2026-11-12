@@ -43,3 +43,4 @@ export function StatsTab({ exercises, history }) {
 }
 
 export default StatsTab
+

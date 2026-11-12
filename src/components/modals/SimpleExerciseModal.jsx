@@ -66,3 +66,4 @@ export function SimpleExerciseModal({
 }
 
 export default SimpleExerciseModal
+

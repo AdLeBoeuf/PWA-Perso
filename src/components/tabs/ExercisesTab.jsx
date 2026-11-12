@@ -350,3 +350,4 @@ export function ExercisesTab({ uid, exercises, refresh, setNotice }) {
 }
 
 export default ExercisesTab
+

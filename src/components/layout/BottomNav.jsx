@@ -18,3 +18,4 @@ export function BottomNav({ activeTab, onSelectTab }) {
 }
 
 export default BottomNav
+

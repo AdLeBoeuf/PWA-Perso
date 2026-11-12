@@ -10,3 +10,4 @@ export function Empty({ text }) {
 }
 
 export default Empty
+

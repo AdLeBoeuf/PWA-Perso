@@ -88,3 +88,4 @@ export function WorkoutsTab({ uid, sessions, exercises, refresh, setNotice, star
 }
 
 export default WorkoutsTab
+
